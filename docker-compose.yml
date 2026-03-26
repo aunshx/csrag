@@ -11,18 +11,26 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5432:5432"   # only accessible locally, not exposed to internet
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
 
   api:
     build: .
     restart: always
     ports:
-      - "127.0.0.1:8000:8000"   # Nginx will proxy to this
+      - "127.0.0.1:8000:8000"
     environment:
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASS}@db:5432/firegnn
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      REDIS_URL: redis://redis:6379
     depends_on:
       - db
+      - redis
 
 volumes:
   pgdata:

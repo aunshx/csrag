@@ -6,7 +6,9 @@ import hashlib
 import redis
 
 class ToolCache:
-    def __init__(self, redis_url: str = "redis://localhost:6379", prefix: str = "csrag"):
+    def __init__(self, redis_url: str = None, prefix: str = "csrag"):
+        if redis_url is None:
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         self._redis = redis.from_url(redis_url)
         self._prefix = prefix
         print(f"[CACHE] Connected to Redis at {redis_url}")
