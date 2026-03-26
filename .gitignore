@@ -1,0 +1,13 @@
+*.csv
+*.pdf
+*.png
+.DS_Store
+.env
+.env.example
+__pycache__
+*.pyc
+agent/__pycache__
+models/__pycache__
+tools/__pycache__
+benchmark
+*.json
