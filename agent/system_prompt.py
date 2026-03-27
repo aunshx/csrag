@@ -98,7 +98,7 @@ estimate_demand → estimate_radius → retrieve_clusters → build_supply_curve
 **Step 5: Report results.** Use exact numbers from tools. Always show cost breakdown:
 "Avg delivered cost: $X/GT (harvest: $Y/GT + transport: $Z/GT)"
 
-**Step 6: Tradeoff analysis (only when explicitly requested).** Call analyze_tradeoffs ONLY if the user explicitly asks about fire-cost tradeoffs, leverage, ownership breakdown, or system distribution. Do NOT call it automatically after every pipeline run.
+**Step 6: Tradeoff analysis (when relevant).** After the initial pipeline, call analyze_tradeoffs to compute location-specific findings. Report the ACTUAL leverage and breakdown for this site, not memorized averages.
 
 **Step 7: Multi-year projection (optional).** After single-year results, offer:
 "Would you like to see how costs change over N years?"
@@ -107,17 +107,9 @@ If yes, follow this exact sequence:
 
 1. Ask the user how many years they want to simulate (if not already stated).
 
-2. Calculate the total biomass needed across the full horizon:
-   total_demand = demand_bdt × n_years × 1.5
-   (The 1.5 buffer ensures the pool covers the full run even with uneven depletion.)
+2. Call project_multi_year directly using the already-cached clusters. Do NOT call estimate_radius or retrieve_clusters again before this. The simulation handles radius expansion internally — when the current pool is exhausted, it automatically fetches new clusters from the DB in 15km rings up to a 600km cap.
 
-3. Call estimate_radius with total_demand as the demand_bdt parameter.
-
-4. Call retrieve_clusters at that radius.
-
-5. Call project_multi_year on the full pool.
-
-This is exactly 2 DB calls regardless of how many years are simulated. Never call retrieve_clusters multiple times for a multi-year projection.
+This is zero extra DB calls for early years and automatic on-demand expansion for later years.
 
 **Exception:** If the user provides everything in one message (e.g., "25MW GPO near Quincy, fire matters"), skip the questions and run the pipeline directly — including geocoding "Quincy" first.
 
@@ -328,7 +320,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "estimate_radius",
-        "description": "Find the minimum procurement radius that provides enough biomass to meet a given demand. For single-year analysis, pass the annual demand_bdt. For multi-year projections, pass total_demand = demand_bdt × n_years × 1.5 to get a radius large enough to cover the full simulation horizon in one retrieval.",
+        "description": "Find the minimum procurement radius that provides enough biomass to meet a given demand. Pass the annual demand_bdt for single-year analysis.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -336,7 +328,7 @@ TOOL_DEFINITIONS = [
                 "lng": {"type": "number", "description": "Facility longitude"},
                 "demand_bdt": {
                     "type": "number",
-                    "description": "Biomass demand in BDT. For single year: annual demand. For multi-year: annual_demand × n_years × 1.5"
+                    "description": "Annual biomass demand in BDT."
                 },
                 "treatmentid": {
                     "type": "integer",
@@ -403,7 +395,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "project_multi_year",
-        "description": "Simulate multi-year facility operation with temporal depletion. Shows how costs escalate as nearby clusters are exhausted and procurement expands outward. IMPORTANT: before calling this, call estimate_radius with total_demand = demand_bdt × n_years × 1.5, then retrieve_clusters at that radius. This gives the simulation a pool large enough to cover all N years in exactly 2 DB calls.",
+        "description": "Simulate multi-year facility operation with temporal depletion. Shows how costs escalate as nearby clusters are exhausted and the procurement radius expands outward automatically. Call this directly using the already-cached clusters — no need to re-run estimate_radius or retrieve_clusters first. The simulation fetches new cluster rings from the DB on demand when the pool runs short.",
         "input_schema": {
             "type": "object",
             "properties": {
