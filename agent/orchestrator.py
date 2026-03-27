@@ -10,6 +10,7 @@ extract cluster geometries for map rendering.
 """
 
 import json
+import anthropic
 from anthropic import Anthropic
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, TREATMENTS
 from agent.system_prompt import SYSTEM_PROMPT, TOOL_DEFINITIONS
@@ -35,6 +36,7 @@ TOOL_TTL = {
 
 
 TOOL_LABELS = {
+    "geocode_location":     "Looking up location coordinates",
     "estimate_demand":      "Calculating biomass demand",
     "get_regional_summary": "Getting regional data",
     "find_best_locations":  "Scanning California for optimal sites",
@@ -404,6 +406,35 @@ def run_agent(
             tools=TOOL_DEFINITIONS,
             messages=conversation_history,
         )
+        except anthropic.BadRequestError as e:
+            if "tool_use" in str(e) and "tool_result" in str(e):
+                # Strip orphaned tool_use blocks left by a previous failed request
+                cleaned = []
+                for i, msg in enumerate(conversation_history):
+                    if msg["role"] == "assistant":
+                        content = msg.get("content", [])
+                        if isinstance(content, list):
+                            has_tool_use = any(
+                                b.get("type") == "tool_use" for b in content
+                                if isinstance(b, dict)
+                            )
+                            next_msg = conversation_history[i + 1] if i + 1 < len(conversation_history) else None
+                            has_result = next_msg and isinstance(next_msg.get("content"), list) and any(
+                                b.get("type") == "tool_result" for b in next_msg["content"]
+                                if isinstance(b, dict)
+                            )
+                            if has_tool_use and not has_result:
+                                continue
+                    cleaned.append(msg)
+                conversation_history[:] = cleaned
+                continue
+            raise
+        except anthropic.APIStatusError as e:
+            if e.status_code == 529:
+                import time
+                time.sleep(5)
+                continue
+            raise
         except Exception as e:
             if "prompt is too long" in str(e):
                 return "The conversation got too large to continue. Please start a new session.", conversation_history

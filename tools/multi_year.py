@@ -218,59 +218,178 @@ def project_multi_year(
         "yearly": yearly_results,
     }
 
-async def project_multi_year_streaming(
-    clusters, facility_lat, facility_lng, demand_bdt,
-    alpha=1.0, n_years=10, transport_params=None, regrowth_rate=0.0
+RADIUS_STEP_KM = 5
+CALIFORNIA_MAX_KM = 600
+
+
+
+
+def _fetch_ring(
+    facility_lat, facility_lng, inner_km, outer_km, treatmentid, known_nos
 ):
-    """Same logic as project_multi_year but yields one year at a time."""
-    pool = [{"cluster": c, "remaining_biomass": c.total_biomass_bdt,
-             "year_first_harvested": None, "times_harvested": 0} for c in clusters]
-    
-    known_selected = set()
+    """Fetch clusters in the annular ring between inner_km and outer_km."""
+    result = retrieve_clusters(
+        lat=facility_lat, lng=facility_lng,
+        radius_km=outer_km, treatmentid=treatmentid,
+    )
+    new = []
+    for c in result.clusters:
+        if c.cluster_no in known_nos:
+            continue
+        dist = _straight_km(c.landing_lat, c.landing_lng, facility_lat, facility_lng)
+        if dist >= inner_km:
+            new.append(c)
+    return new
+
+
+def _pool_to_available(pool):
+    available = []
+    for p in pool:
+        if p["remaining_biomass"] < 0.5:
+            continue
+        c = p["cluster"]
+        available.append(ClusterData(
+            cluster_no=c.cluster_no,
+            treatmentid=c.treatmentid,
+            best_system=c.best_system,
+            harvest_cost=c.harvest_cost,
+            total_biomass_bdt=p["remaining_biomass"],
+            center_lat=c.center_lat,
+            center_lng=c.center_lng,
+            landing_lat=c.landing_lat,
+            landing_lng=c.landing_lng,
+            slope=c.slope,
+            burn_probability=c.burn_probability,
+            cf_estimate=c.cf_estimate,
+            county_name=c.county_name,
+        ))
+    return available
+
+
+async def project_multi_year_streaming(
+    clusters,
+    facility_lat,
+    facility_lng,
+    demand_bdt,
+    alpha=1.0,
+    n_years=10,
+    transport_params=None,
+    regrowth_rate=0.0,
+    treatmentid=1,
+    initial_radius_km=None,
+):
+    """
+    Streaming multi-year projection with full depletion and incremental
+    5km ring expansion.
+
+    Full depletion is correct — total_biomass_bdt already represents
+    the harvestable volume under the chosen treatment prescription.
+    Smaller 5km rings reduce terrain heterogeneity per expansion step,
+    producing smoother cost escalation than larger 20km jumps.
+    """
+    import asyncio
+
+    n_years = min(max(n_years, 1), 20)
+    pool = [
+        {"cluster": c, "remaining_biomass": c.total_biomass_bdt,
+         "year_first_harvested": None}
+        for c in clusters
+    ]
+    known_nos = {p["cluster"].cluster_no for p in pool}
+
+    if initial_radius_km is None:
+        initial_radius_km = (
+            max(
+                _straight_km(p["cluster"].landing_lat, p["cluster"].landing_lng,
+                              facility_lat, facility_lng)
+                for p in pool
+            ) if pool else 30.0
+        )
+    current_radius_km = initial_radius_km
 
     for year in range(1, n_years + 1):
-        available = [
-            ClusterData(
-                cluster_no=p["cluster"].cluster_no,
-                treatmentid=p["cluster"].treatmentid,
-                best_system=p["cluster"].best_system,
-                harvest_cost=p["cluster"].harvest_cost,
-                total_biomass_bdt=p["remaining_biomass"],
-                center_lat=p["cluster"].center_lat,
-                center_lng=p["cluster"].center_lng,
-                landing_lat=p["cluster"].landing_lat,
-                landing_lng=p["cluster"].landing_lng,
-                slope=p["cluster"].slope,
-                burn_probability=p["cluster"].burn_probability,
-                cf_estimate=p["cluster"].cf_estimate,
-                county_name=p["cluster"].county_name,
-            )
-            for p in pool if p["remaining_biomass"] > 0.5
-        ]
+        available = _pool_to_available(pool)
 
         if not available:
-            yield {"year": year, "status": "exhausted",
-                   "selected_cluster_nos": [], "n_selected": 0,
-                   "avg_delivered_cost": 0, "avg_harvest_cost": 0,
-                   "avg_transport_cost": 0, "effective_radius_km": 0}
+            yield {
+                "year": year, "status": "exhausted",
+                "selected_cluster_nos": [], "n_selected": 0,
+                "avg_delivered_cost": 0, "avg_harvest_cost": 0,
+                "avg_transport_cost": 0,
+                "effective_radius_km": round(current_radius_km, 1),
+                "current_pool_radius_km": round(current_radius_km, 1),
+                "pool_size": 0, "radius_expanded": False,
+            }
             break
 
-        result = build_supply_curve(available, facility_lat, facility_lng, demand_bdt, alpha, transport_params)
+        result = build_supply_curve(
+            available, facility_lat, facility_lng, demand_bdt, alpha, transport_params
+        )
+        demand_met = result.total_biomass_selected >= demand_bdt * 0.95
 
-        selected_nos = set(sc.cluster_no for sc in result.selected_clusters)
+        # Expand radius in rings until demand is met or state is exhausted
+        expansion_attempted = False
+        empty_ring_streak = 0
+
+        while not demand_met and current_radius_km < CALIFORNIA_MAX_KM and empty_ring_streak < 2:
+            inner_km = current_radius_km
+            outer_km = current_radius_km + RADIUS_STEP_KM
+            new_clusters = _fetch_ring(
+                facility_lat, facility_lng, inner_km, outer_km,
+                treatmentid, known_nos,
+            )
+            current_radius_km = outer_km
+            expansion_attempted = True
+
+            if new_clusters:
+                empty_ring_streak = 0
+                for c in new_clusters:
+                    pool.append({
+                        "cluster": c,
+                        "remaining_biomass": c.total_biomass_bdt,
+                        "year_first_harvested": None,
+                    })
+                    known_nos.add(c.cluster_no)
+                available = _pool_to_available(pool)
+                result = build_supply_curve(
+                    available, facility_lat, facility_lng,
+                    demand_bdt, alpha, transport_params
+                )
+                demand_met = result.total_biomass_selected >= demand_bdt * 0.95
+            else:
+                empty_ring_streak += 1
+
+            await asyncio.sleep(0)
+
+        # Full depletion — each selected cluster is fully harvested in one visit
+        selected_nos = {sc.cluster_no for sc in result.selected_clusters}
         for p in pool:
             if p["cluster"].cluster_no in selected_nos:
-                p["remaining_biomass"] = 0.0
                 if p["year_first_harvested"] is None:
                     p["year_first_harvested"] = year
+                p["remaining_biomass"] = 0.0
 
-        selected_lookup = {p["cluster"].cluster_no: p["cluster"] for p in pool if p["cluster"].cluster_no in selected_nos}
+        selected_map = {
+            p["cluster"].cluster_no: p["cluster"]
+            for p in pool if p["cluster"].cluster_no in selected_nos
+        }
         max_distance = max(
-            (_straight_km(c.landing_lat, c.landing_lng, facility_lat, facility_lng) for c in selected_lookup.values()),
-            default=0
+            (_straight_km(c.landing_lat, c.landing_lng, facility_lat, facility_lng)
+             for c in selected_map.values()),
+            default=current_radius_km,
         )
 
-        demand_met = result.total_biomass_selected >= demand_bdt * 0.95
+        # Apply regrowth to fully depleted clusters
+        if regrowth_rate > 0:
+            for p in pool:
+                if p["year_first_harvested"] is not None and p["remaining_biomass"] == 0:
+                    years_since = year - p["year_first_harvested"]
+                    if years_since > 0:
+                        original = p["cluster"].total_biomass_bdt
+                        p["remaining_biomass"] = min(
+                            original * regrowth_rate * years_since, original
+                        )
+
         yield {
             "year": year,
             "status": "ok" if demand_met else "shortfall",
@@ -278,11 +397,17 @@ async def project_multi_year_streaming(
             "avg_harvest_cost": result.avg_harvest_cost,
             "avg_transport_cost": result.avg_transport_cost,
             "effective_radius_km": round(max_distance, 1),
+            "current_pool_radius_km": round(current_radius_km, 1),
             "n_selected": result.n_selected,
+            "pool_size": len(pool),
             "selected_cluster_nos": list(selected_nos),
+            "radius_expanded": expansion_attempted,
         }
-        
+
+        await asyncio.sleep(0)
+
+
 if __name__ == "__main__":
     print("multi_year projection module loaded")
-    print("Requires cached clusters from retrieve_clusters to run")
-    print("Call project_multi_year(clusters, lat, lng, demand, alpha, n_years)")
+    print("Partial depletion + incremental radius expansion")
+    print(f"Harvest fractions by treatment: {HARVEST_FRACTIONS}")
