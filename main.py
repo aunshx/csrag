@@ -368,6 +368,8 @@ async def multi_year_stream(session_id: str = "default"):
             alpha=alpha,
             n_years=n_years,
             regrowth_rate=regrowth,
+            treatmentid=treatmentid,
+            initial_radius_km=state.state.cached_radius_km,
         ):
             yield f"data: {json.dumps(year_result)}\n\n"
             await asyncio.sleep(0)
