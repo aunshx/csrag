@@ -2,10 +2,10 @@ version: "3.9"
 
 services:
   db:
-    image: postgis/postgis:16-3.4
+    image: postgis/postgis:17-3.4
     restart: always
     environment:
-      POSTGRES_DB: firegnn
+      POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASS}
     volumes:
@@ -24,10 +24,8 @@ services:
     restart: always
     ports:
       - "127.0.0.1:8000:8000"
-    environment:
-      DATABASE_URL: postgresql://${DB_USER}:${DB_PASS}@db:5432/firegnn
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      REDIS_URL: redis://redis:6379
+    env_file:
+      - .env
     depends_on:
       - db
       - redis
