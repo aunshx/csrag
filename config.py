@@ -10,7 +10,7 @@ DB_CONFIG = {
     "port": int(os.getenv("DB_PORT", 5432)),
     "dbname": os.getenv("DB_NAME", "firegnn"),
     "user": os.getenv("DB_USER", "aunsh"),
-    "password": os.getenv("DB_PASSWORD", ""),
+    "password": os.getenv("DB_PASS", ""),
 }
 
 def get_db_connection():
