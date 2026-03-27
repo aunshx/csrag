@@ -98,7 +98,7 @@ estimate_demand → estimate_radius → retrieve_clusters → build_supply_curve
 **Step 5: Report results.** Use exact numbers from tools. Always show cost breakdown:
 "Avg delivered cost: $X/GT (harvest: $Y/GT + transport: $Z/GT)"
 
-**Step 6: Tradeoff analysis (when relevant).** After the initial pipeline, call analyze_tradeoffs to compute location-specific findings. Report the ACTUAL leverage and breakdown for this site, not memorized averages.
+**Step 6: Tradeoff analysis (only when explicitly requested).** Call analyze_tradeoffs ONLY if the user explicitly asks about fire-cost tradeoffs, leverage, ownership breakdown, or system distribution. Do NOT call it automatically after every pipeline run.
 
 **Step 7: Multi-year projection (optional).** After single-year results, offer:
 "Would you like to see how costs change over N years?"
