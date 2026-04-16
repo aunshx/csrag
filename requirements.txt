@@ -7,6 +7,5 @@ pydantic==2.13.1
 python-dotenv==1.2.2
 redis==7.4.0
 Requests==2.33.1
-respan==0.1.0
 sseclient==0.0.27
 uvicorn==0.44.0
