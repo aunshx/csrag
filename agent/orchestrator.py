@@ -22,9 +22,20 @@ from tools.radius import estimate_radius
 from tools.retrieve import retrieve_clusters
 from tools.compose import build_supply_curve
 from tools.cache import tool_cache
+from respan import Respan
+from anthropic import Anthropic
+import os
+client = Anthropic(
+    api_key=os.environ["RESPAN_API_KEY"],
+    base_url=os.environ["RESPAN_CLAUDE_URL"],
+)
 
+# Legacy Anthropic client - Uncomment later after Respan is removed later and remove the above client initialization
+# Also, update the .env file to remove Respan keys and add back ANTHROPIC_API_KEY and ANTHROPIC_MODEL if needed
+# and update the imports at the top of this file to remove Respan and use Anthropic instead
+# Finally, change the session_id parameter in run_agent calls in main.py to use a fixed string
+# client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
-client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 TOOL_TTL = {
     "estimate_demand": 86400,       # 24 hours (pure math)
@@ -373,6 +384,7 @@ def run_agent(
     state: StateManager,
     conversation_history: list[dict] = None,
     emit=None,
+    session_id: str = "fred-ai",
 ) -> tuple[str, list[dict]]:
     """Run one turn of the agent loop."""
     if conversation_history is None:
@@ -394,18 +406,22 @@ def run_agent(
     for _ in range(10):
         try:
             response = client.messages.create(
-            model=ANTHROPIC_MODEL,
-            max_tokens=4096,
-            system=[
-                {
-                    "type": "text",
-                    "text": full_system,
-                    "cache_control": {"type": "ephemeral"}
+                model=ANTHROPIC_MODEL,
+                max_tokens=4096,
+                system=[
+                    {
+                        "type": "text",
+                        "text": full_system,
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                ],                
+                tools=TOOL_DEFINITIONS,
+                messages=conversation_history,
+                extra_headers={
+                    "X-Thread-Identifier": session_id,
+                    "X-Customer-Identifier": "fred-ai",
                 }
-            ],
-            tools=TOOL_DEFINITIONS,
-            messages=conversation_history,
-        )
+            )
         except anthropic.BadRequestError as e:
             if "tool_use" in str(e) and "tool_result" in str(e):
                 # Strip orphaned tool_use blocks left by a previous failed request
