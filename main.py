@@ -204,6 +204,7 @@ def chat(req: ChatRequest):
             state=state,
             conversation_history=session["history"],
             emit=emit,
+            session_id=req.session_id
         )
         session["history"] = updated_history
 
