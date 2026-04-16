@@ -1,11 +1,12 @@
-anthropic==0.86.0
-fastapi==0.135.2
+anthropic==0.96.0
+fastapi==0.136.0
 h3==4.4.2
 psycopg2==2.9.10
 psycopg2_binary==2.9.9
-pydantic==2.12.5
+pydantic==2.13.1
 python-dotenv==1.2.2
 redis==7.4.0
-Requests==2.33.0
+Requests==2.33.1
+respan==0.1.0
 sseclient==0.0.27
-uvicorn==0.42.0
+uvicorn==0.44.0
